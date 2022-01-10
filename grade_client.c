@@ -141,6 +141,11 @@ static void handle_input(int p[2], int q[2])
             continue;
         }
 
+        else if (strcmp(buffer, "Exit") == 0){
+                kill = true;
+                exit(0);
+        }
+
         else if(strcmp(buffer, "skip") != 0) {
             printf("%s\n", buffer);
             if (strcmp(cmd, "Exit") == 0){

@@ -18,31 +18,29 @@
 #define EG "UpdateGrade 123456789 0"
 #define ER "UpdateGrade 123456789 100"
 #define DEFAULT_PASSWORD "password"
+#define WU "Wrong user information"
+#define NL "Not logged in"
+#define MA "Missing argument"
+#define WI "Wrong input"
+#define II "Invalid id"
 
 typedef struct pthread_arg_t {
     int new_socket_fd;
     struct sockaddr_in client_address;
 } pthread_arg_t;
 
+
 bool check_input(const char *id, const char *pw);
 int write_grade(const char *id, const char *grade);
-
-/* Thread routine to serve connection to client. */
 void *pthread_routine(void *arg);
-
-/* Signal handler to handle SIGTERM and SIGINT signals. */
 void signal_handler(int signal_number);
-
-/* user login */
 int user_login(const char *id, const char *pw);
-
-/* Search files */
 bool search_id_pass(char filename[15], const char *id, const char *pw);
-
-/* Text File editing */
 void init_grades();
 void append(FILE *inf, FILE *outf, const char *suffix);
+void append_content(FILE *inf, FILE *outf, const char *suffix);
 char * read_grade(char *id);
+
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "EndlessLoop"
@@ -92,10 +90,12 @@ int main(int argc, char *argv[]) {
         perror("signal");
         exit(1);
     }
+
     if (signal(SIGTERM, signal_handler) == SIG_ERR) {
         perror("signal");
         exit(1);
     }
+
     if (signal(SIGINT, signal_handler) == SIG_ERR) {
         perror("signal");
         exit(1);
@@ -118,10 +118,6 @@ int main(int argc, char *argv[]) {
     int thread_count = 0;
 
     while (true) {
-        if (thread_count > NUM_CLIENTS) {
-            printf("Server is full, clients: %d.\n", thread_count);
-        }
-
         pthread_arg = (pthread_arg_t *) malloc(sizeof *pthread_arg);
         if (!pthread_arg) {
             perror("malloc");
@@ -135,16 +131,20 @@ int main(int argc, char *argv[]) {
             perror("accept");
             free(pthread_arg);
             continue;
+        } else{
+            thread_count++;
         }
 
         /* Initialise pthread argument. */
         pthread_arg->new_socket_fd = new_socket_fd;
-        /* Create thread to serve connection to client. */
-        if (pthread_create(&pthread, &pthread_attr, pthread_routine, (void *) pthread_arg) != 0) {
-            perror("pthread_create");
-            free(pthread_arg);
-            thread_count -= 1;
-            continue;
+        if (thread_count <= NUM_CLIENTS) {
+            /* Create thread to serve connection to client. */
+            if (pthread_create(&pthread, &pthread_attr, pthread_routine, (void *) pthread_arg) != 0) {
+                perror("pthread_create");
+                free(pthread_arg);
+                thread_count -= 1;
+                continue;
+            }
         }
     }
     return 0;
@@ -172,9 +172,7 @@ void *pthread_routine(void *arg) {
     char logged_id[10] = {0};
     char logout[BUFFER_SIZE] = "Goodbye ";
 
-
     while (true){
-
         read(new_socket_fd, buffer, BUFFER_SIZE);
         strcpy(parser, buffer);
         token = strtok_r(parser, delim, &tok_buffer);
@@ -182,7 +180,7 @@ void *pthread_routine(void *arg) {
 
         if ((strcmp(msg, "Login" ) == 0) & !st_login & !ta_login){
             if (strlen(buffer) < 7){
-                write(new_socket_fd, "Wrong user information", BUFFER_SIZE);
+                write(new_socket_fd, WU, sizeof(WU));
                 continue;}
             token = strtok_r(NULL, delim, &tok_buffer);
             id = token;
@@ -194,31 +192,31 @@ void *pthread_routine(void *arg) {
             if (i == 1 && (!st_login | !ta_login)) {
                 strcat(answer, "Student ");
                 strcat(answer, id);
-                write(new_socket_fd, answer, BUFFER_SIZE);
+                write(new_socket_fd, answer, sizeof(answer));
                 strcat(logout, id);
                 st_login = true;
-                strcat(logged_id, id);
+                strcpy(logged_id, id);
                 }
             else if (i == 2 && (!st_login | !ta_login)) {
                 strcat(answer, "TA ");
                 strcat(answer, id);
-                write(new_socket_fd, answer, BUFFER_SIZE);
+                write(new_socket_fd, answer, sizeof(answer));
                 strcat(logout, id);
                 ta_login = true;
-                strcat(logged_id, id);
+                strcpy(logged_id, id);
                 }
             else {
-                write(new_socket_fd, "Wrong user information", BUFFER_SIZE);
+                write(new_socket_fd, WU, sizeof(WU));
                 }
         }
 
         else if ((strcmp(msg, "Login" ) == 0) && (st_login || ta_login)){
-            write(new_socket_fd, "Wrong user information", BUFFER_SIZE);
+            write(new_socket_fd, WU, sizeof(WU));
         }
 
         else if (strcmp(msg, "Logout") == 0) {
             if (!st_login & !ta_login) {
-                write(new_socket_fd, "Not logged in", BUFFER_SIZE);
+                write(new_socket_fd, NL, sizeof(NL));
                 continue;
             }
 
@@ -237,6 +235,9 @@ void *pthread_routine(void *arg) {
                 write(new_socket_fd, logout, BUFFER_SIZE);
                 strcpy(logout, "Goodbye ");
             }
+            else{
+                write(new_socket_fd, "Exit", sizeof("Exit"));
+            }
             ext_flag = true;
             close(new_socket_fd);
             free(pthread_arg);
@@ -246,13 +247,13 @@ void *pthread_routine(void *arg) {
         /* Actions after login*/
         else if(strcmp(msg, "ReadGrade") == 0){
             if (!st_login & !ta_login) {
-                write(new_socket_fd, "Not logged in", BUFFER_SIZE);
+                write(new_socket_fd, NL, sizeof(NL));
                 continue;
             }
-            if ((strlen(buffer) < 10) & st_login){
+            if (st_login){
                 const char *grade;
                 grade = read_grade(logged_id);
-                write(new_socket_fd, grade, BUFFER_SIZE);
+                write(new_socket_fd, grade, sizeof(grade));
                 continue;
             }
             else if (ta_login){
@@ -260,13 +261,13 @@ void *pthread_routine(void *arg) {
                 const char *grade;
                 char grade_answer[BUFFER_SIZE] = {0};
                 if (strlen(buffer) < strlen("ReadGrade ")) {
-                    write(new_socket_fd, "Missing argument", BUFFER_SIZE);
+                    write(new_socket_fd, MA, sizeof(MA));
                     continue;}
                 token = strtok_r(NULL, delim, &tok_buffer);
                 id_read = token;
                 grade = read_grade(id_read);
                 if (grade == NULL) {
-                    write(new_socket_fd, "Invalid id", BUFFER_SIZE);
+                    write(new_socket_fd, II, sizeof(II));
                     continue;}
                 strcat(grade_answer, id_read);
                 strcat(grade_answer, ": ");
@@ -280,21 +281,21 @@ void *pthread_routine(void *arg) {
 
         else if(strcmp(msg, "UpdateGrade") == 0){
             if (!st_login & !ta_login) {
-                write(new_socket_fd, "Not logged in", BUFFER_SIZE);
+                write(new_socket_fd, NL, sizeof(NL));
                 continue;
             }
             else if (st_login){
-                write(new_socket_fd, ANT, BUFFER_SIZE);
+                write(new_socket_fd, ANT, sizeof(ANT));
                 continue;
             }
             else if (strlen(buffer) < strlen(EG)) {
-                write(new_socket_fd, "Missing argument", BUFFER_SIZE);
+                write(new_socket_fd, MA, sizeof(MA));
                 continue;
             }
 
             else if (ta_login) {
                 if (strlen(buffer) < strlen(EG)) {
-                    write(new_socket_fd, "Wrong input", BUFFER_SIZE);
+                    write(new_socket_fd, WI, sizeof(WI));
                     continue;}
                 const char *grade;
                 const char *id_update;
@@ -303,17 +304,17 @@ void *pthread_routine(void *arg) {
                 token = strtok_r(NULL, delim, &tok_buffer);
                 grade = token;
                 write_grade(id_update, grade);
-                write(new_socket_fd, "skip", BUFFER_SIZE);
+                write(new_socket_fd, "skip", sizeof("skip"));
             }
         }
 
         else if(strcmp(msg, "ListGrades") == 0){
             if (!st_login & !ta_login) {
-                write(new_socket_fd, "Not logged in", BUFFER_SIZE);
+                write(new_socket_fd, NL, sizeof(NL));
                 continue;}
 
             else if (st_login){
-                write(new_socket_fd, ANT, BUFFER_SIZE);
+                write(new_socket_fd, ANT, sizeof(ANT));
                 continue;
             }
 
@@ -348,12 +349,12 @@ void *pthread_routine(void *arg) {
                 }
                 fclose(fp);
                 read(new_socket_fd, buffer1, sizeof(buffer));
-                write(new_socket_fd, "end", BUFFER_SIZE);
+                write(new_socket_fd, "end", sizeof("end"));
                 continue;
               }
             }
         else {
-            write(new_socket_fd, "Wrong input", BUFFER_SIZE);
+            write(new_socket_fd, WI, sizeof(WI));
         }
     }
 
@@ -365,7 +366,6 @@ void *pthread_routine(void *arg) {
     }
     return NULL;
 }
-
 
 int user_login(const char *id, const char *pw) {
     bool check_student   = search_id_pass(ST, id, pw);
@@ -429,7 +429,32 @@ void append(FILE *inf, FILE *outf, const char *suffix) {
             strcpy(out_text, text);
         }
         fputs(out_text, outf);
-    }}
+    }
+}
+
+void append_cond(FILE *in, FILE *out, const char *suffix) {
+    char line[BUFFER_SIZE] = {0};
+    char parser[BUFFER_SIZE] = {0};
+    char *token, *tok_buf;
+    char *pw_buffer, *id_buffer, *grade_buffer;
+    char delim[] = ": \n";
+    while (fgets(line, BUFFER_SIZE, in) != NULL) {
+        char new_line[BUFFER_SIZE] = {0};
+        strcpy(parser, line);
+        token = strtok_r(parser, delim, &tok_buf);
+        id_buffer = token;
+        token = strtok_r(NULL, delim, &tok_buf);
+        pw_buffer = token;
+        strcat(new_line, id_buffer);
+        strcat(new_line, ":");
+        strcat(new_line, pw_buffer);
+        strcat(new_line, suffix);
+        if (line[strlen(line) -1] == '\n') {
+            strcat(new_line, "\n");
+        }
+        fputs(new_line, out);
+    }
+}
 
 
 void init_grades() {
@@ -440,7 +465,7 @@ void init_grades() {
         printf("Error opening file!\n");
         exit(1);
     }
-    append(in, out, " 0");
+    append_cond(in, out, " 0");
     fclose(in);
     fclose(out);
     remove(ST);
@@ -517,11 +542,9 @@ int write_grade(const char *id, const char *grade) {
     FILE *fp, *temp;
     char line[BUFFER_SIZE] = {0};
     char parser[BUFFER_SIZE] = {0};
-    char *token;
-    char *tok_buf;
-    char *pw_buffer, *id_buffer;
+    char *token, *tok_buf;;
+    char *pw_buffer, *id_buffer, *grade_buffer;
     char delim[] = ": \r\n";
-    char new_line[BUFFER_SIZE] = {0};
     bool found = false;
     fp = fopen(ST, "r");
     temp = fopen("remove.tmp", "w");
@@ -530,41 +553,42 @@ int write_grade(const char *id, const char *grade) {
         return -1;
     }
     while (fgets(line, BUFFER_SIZE, fp) != NULL) {
+        char new_line[BUFFER_SIZE] = {0};
         strcpy(parser, line);
         token = strtok_r(parser, delim, &tok_buf);
         id_buffer = token;
+        token = strtok_r(NULL, delim, &tok_buf);
+        pw_buffer = token;
+        token = strtok_r(NULL, delim, &tok_buf);
+        grade_buffer = token;
+        strcat(new_line, id_buffer);
+        strcat(new_line, ":");
+        strcat(new_line, pw_buffer);
+        strcat(new_line, " ");
         if (strcmp(id_buffer, id) == 0) {
-            token = strtok_r(NULL, delim, &tok_buf); // get password, skip
-            pw_buffer = token;
-            strcat(new_line, id_buffer);
-            strcat(new_line, ":");
-            strcat(new_line, pw_buffer);
-            strcat(new_line, " ");
             strcat(new_line, grade);
-            if (line[strlen(line) - 1] == '\n') {
-                strcat(new_line, "\n");
-            }
-            fputs(new_line, temp);
             found = true;
         } else {
-            fputs(line, temp);
+            strcat(new_line, grade_buffer);
         }
+        if (line[strlen(line) - 1] == '\n') {
+            strcat(new_line, "\n");
+        }
+        fputs(new_line, temp);
+        }
+
+    if (!found) {
+        char new_line[BUFFER_SIZE] = {0};
+        fputs("\n", temp);
+        strcat(new_line, id);
+        strcat(new_line, ":");
+        strcat(new_line, DEFAULT_PASSWORD);
+        strcat(new_line, " ");
+        strcat(new_line, grade);
+        fputs(new_line, temp);
     }
     fclose(fp);
     fclose(temp);
-
-    if (!found){
-        temp = fopen("remove.tmp", "a");
-        fputs("\n", temp);
-        char empty_line[BUFFER_SIZE];
-        strcat(empty_line, id);
-        strcat(empty_line, ":");
-        strcat(empty_line, DEFAULT_PASSWORD); // since users are stored in "id:password grade" format
-        strcat(empty_line, " ");
-        strcat(empty_line, grade);
-        fputs(empty_line, temp);
-        fclose(temp);
-    }
     remove(ST);
     rename("remove.tmp", ST);
     return 0;
